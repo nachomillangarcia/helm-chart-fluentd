@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-config
+data:
+  myconfig: |
+    <match fluent.**>
+      @type null
+    </match>
+{{ .Values.sources | indent 4 }}
+{{ .Values.filters | indent 4 }}
+{{ .Values.outputs | indent 4 }}

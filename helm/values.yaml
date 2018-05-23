@@ -1,0 +1,82 @@
+image: nachomillangarcia/fluentd-k8s
+tolerations:
+  - operator: "Exists"
+resources:
+  limits:
+    cpu: 100m
+    memory: 500Mi
+  requests:
+    cpu: 50m
+    memory: 300Mi
+clusterRole: cluster-admin
+sources: |
+  # Containers output
+  <source>
+    @type tail
+    path /var/log/containers/*.log
+    pos_file /var/log/fluentd-containers.log.pos
+    time_format %Y-%m-%dT%H:%M:%S.%NZ
+    tag kubernetes.*
+    format json
+    read_from_head true
+  </source>
+
+  # Docker Daemon
+  <source>
+    @type tail
+    format syslog
+    path /var/log/kubernetes/dockerd.log
+    pos_file /var/log/kubernetes/fluentd-dockerd.log.pos
+    tag docker
+  </source>
+
+  # Kubelet
+  <source>
+    @type tail
+    path /var/log/kubernetes/kubelet.log
+    pos_file /var/log/kubernetes/fluentd-kuebelet.log.pos
+    tag kubelet
+    format syslog
+  </source>
+
+filters: |
+  # Read Kubernetes Metadata
+  <filter kubernetes.**>
+    @type kubernetes_metadata
+    annotation_match [ "fluentd.+"]
+    cache_size 10000
+    de_dot false
+  </filter>
+
+  # Filter records with annotation fluentd.active=true
+  <filter kubernetes.**>
+    @type grep
+    <regexp>
+      key $["kubernetes"]["annotations"]["fluentd.active"]
+      pattern "^true$"
+    </regexp>
+  </filter>
+
+  <filter kubernetes.**>
+    @type record_transformer
+    enable_ruby
+
+    # Parse the record with the annotation fluentd.regexp
+    <record>
+      parsed_log ${if record["kubernetes"]["annotations"].key?("fluentd.regexp") then r = /#{record["kubernetes"]["annotations"]["fluentd.regexp"]}/.match(record["log"]); if !r.nil? then Hash[ r.names.zip( r.captures ) ].to_json end end}
+    </record>
+
+    # Remove useless keys
+    <record>
+      to_remove ${record["docker"].delete("container_id");record["kubernetes"].delete("annotations"); record["kubernetes"]["labels"].delete("pod-template-hash"); record["kubernetes"].delete("master_url"); record["kubernetes"].delete("pod_id"); record["kubernetes"].delete("namespace_id");}
+    </record>
+    remove_keys to_remove
+  </filter>
+
+outputs: |
+  <match kubernetes.** >
+    @type null
+  </match>
+  <match kubelet docker>
+    @type null
+  </match>
